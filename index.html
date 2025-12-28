@@ -350,6 +350,22 @@
           
           if (!fileId) {
             metadata.parents = ['appDataFolder'];
+        
+            // This block is intentionally left empty for future implementation
+            /* Make the progress file in drive visible(change the code)
+              If you want the file visible in your regular Drive, find this in your code:
+            metadata.parents = ['appDataFolder'];
+              Replace with:
+              // metadata.parents = ['appDataFolder']; // Hidden app folder
+              // Now saves to root of Drive (visible)
+
+            And also change this in async findFile():
+            `https://www.googleapis.com/drive/v3/files?q=name='${DRIVE_FILE_NAME}' and trashed=false&spaces=appDataFolder`,
+              Replace with:
+            `https://www.googleapis.com/drive/v3/files?q=name='${DRIVE_FILE_NAME}' and trashed=false`,
+                
+            Then you'll see sharmin-training-progress.json in your Drive root.*/
+
           }
           
           const form = new FormData();
