@@ -62,6 +62,7 @@
       currentWeek: 1,
       startDate: new Date().toISOString(),
       lastUpdated: new Date().toISOString(),
+      lastLogin: null,
       dsa: { patterns: {}, problemsSolved: 0 },
       math: { topics: {} },
       ml: { courses: {} },
@@ -376,10 +377,38 @@
       const [progress, setProgress] = useState(initialProgress);
       const [user, setUser] = useState(null);
       const [syncStatus, setSyncStatus] = useState('idle'); // idle, syncing, synced, error
+      const [lastLoginFromCloud, setLastLoginFromCloud] = useState(null);
       const [activeTab, setActiveTab] = useState('overview');
       const [expandedPattern, setExpandedPattern] = useState(null);
-      const fileInputRef = useRef(null);
       const saveTimeoutRef = useRef(null);
+
+      // Format date for display with timezone offset
+      const formatLoginTime = (isoString) => {
+        if (!isoString) return null;
+        const date = new Date(isoString);
+        const options = { 
+          weekday: 'short',
+          year: 'numeric', 
+          month: 'short', 
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true
+        };
+        const formattedDate = date.toLocaleString(undefined, options);
+        
+        // Get timezone offset in hours and minutes
+        const offset = -date.getTimezoneOffset();
+        const offsetHours = Math.floor(Math.abs(offset) / 60);
+        const offsetMins = Math.abs(offset) % 60;
+        const offsetSign = offset >= 0 ? '+' : '-';
+        const offsetStr = `UTC${offsetSign}${offsetHours}:${offsetMins.toString().padStart(2, '0')}`;
+        
+        // Get timezone abbreviation
+        const tzAbbr = date.toLocaleTimeString('en-US', { timeZoneName: 'short' }).split(' ').pop();
+        
+        return `${formattedDate} (${tzAbbr} ${offsetStr})`;
+      };
 
       // Initialize Google Sign-In
       useEffect(() => {
@@ -395,6 +424,8 @@
               callback: handleGoogleSignIn,
               auto_select: true
             });
+            // Show the sign-in prompt automatically
+            window.google.accounts.id.prompt();
           } else {
             setTimeout(initGoogle, 100);
           }
@@ -427,6 +458,11 @@
               // Load from Drive
               const driveProgress = await DriveAPI.loadProgress();
               if (driveProgress) {
+                // Store the previous login time to display
+                if (driveProgress.lastLogin) {
+                  setLastLoginFromCloud(driveProgress.lastLogin);
+                }
+                
                 // Use the most recent version
                 const localProgress = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
                 const useCloud = new Date(driveProgress.lastUpdated || 0) > new Date(localProgress.lastUpdated || 0);
@@ -435,6 +471,18 @@
                   localStorage.setItem(STORAGE_KEY, JSON.stringify(driveProgress));
                 }
               }
+              
+              // Now save the NEW login timestamp
+              const currentLogin = new Date().toISOString();
+              const updatedProgress = { 
+                ...progress, 
+                lastLogin: currentLogin,
+                lastUpdated: currentLogin 
+              };
+              setProgress(updatedProgress);
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedProgress));
+              await DriveAPI.saveProgress(updatedProgress);
+              
               setSyncStatus('synced');
             }
           });
@@ -449,13 +497,19 @@
           alert('Google Client ID not configured. See setup instructions below.');
           return;
         }
-        window.google?.accounts?.id?.prompt();
+        // Prompt doesn't work after sign-out, so reload the page to reset Google's state
+        window.location.reload();
       };
 
       const signOut = () => {
         setUser(null);
         DriveAPI.setToken(null);
         setSyncStatus('idle');
+        setLastLoginFromCloud(null);
+        // Clear Google's cached state
+        if (window.google?.accounts?.id) {
+          window.google.accounts.id.disableAutoSelect();
+        }
       };
 
       // Save with debounce
@@ -505,7 +559,7 @@
         saveProgress(newProgress);
       };
 
-      // Export/Import for manual backup
+      // Export for manual backup
       const exportProgress = () => {
         const blob = new Blob([JSON.stringify(progress, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -513,22 +567,6 @@
         a.href = url;
         a.download = `training-progress-${new Date().toISOString().split('T')[0]}.json`;
         a.click();
-      };
-
-      const importProgress = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          try {
-            const imported = JSON.parse(e.target.result);
-            saveProgress(imported);
-            alert('Progress imported successfully!');
-          } catch {
-            alert('Invalid file format');
-          }
-        };
-        reader.readAsText(file);
       };
 
       // Stats
@@ -556,6 +594,17 @@
           <div className="max-w-5xl mx-auto">
             {/* Header */}
             <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl p-5 mb-5 text-white shadow-lg">
+              {/* Last Login Banner */}
+              {user && (
+                <div className="bg-white/10 rounded-lg px-3 py-2 mb-4 text-sm flex items-center gap-2">
+                  <span>{lastLoginFromCloud ? '✅' : '🎉'}</span>
+                  <span>{lastLoginFromCloud
+                    ? <>Last synced: <strong>{formatLoginTime(lastLoginFromCloud)}</strong></>
+                    : <strong>Welcome! This is your first login.</strong>
+                  }</span>
+                </div>
+              )}
+              
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
                   <h1 className="text-xl md:text-2xl font-bold">🚀 Sharmin's Training Dashboard</h1>
@@ -618,15 +667,11 @@
                 </button>
               ))}
               
-              {/* Export/Import */}
-              <div className="ml-auto flex gap-2">
+              {/* Export */}
+              <div className="ml-auto">
                 <button onClick={exportProgress} className="px-3 py-2 rounded-lg text-sm bg-white text-gray-600 hover:bg-gray-100">
                   📥 Export
                 </button>
-                <label className="px-3 py-2 rounded-lg text-sm bg-white text-gray-600 hover:bg-gray-100 cursor-pointer">
-                  📤 Import
-                  <input type="file" accept=".json" onChange={importProgress} className="hidden" ref={fileInputRef} />
-                </label>
               </div>
             </div>
 
